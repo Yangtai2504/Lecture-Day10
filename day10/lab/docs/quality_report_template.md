@@ -1,6 +1,6 @@
 # Quality report — Lab Day 10 (nhóm)
 
-**run_id:** fix-01
+**run_id:** fix-03
 **Ngày:** 2026-06-10
 
 ---
@@ -10,10 +10,10 @@
 | Chỉ số | inject-bad (before) | fix-01 (after) | Ghi chú |
 |--------|--------------------|--------------------|---------|
 | raw_records | 247 | 247 | Cùng input CSV |
-| cleaned_records | 36 | 36 | Bằng nhau — inject chỉ thay nội dung text, không thêm/bớt rows |
-| quarantine_records | 211 | 211 | 211/247 rows bị quarantine (doc_id không hợp lệ, stale date, duplicate...) |
+| cleaned_records | 36 | 35 | fix-03: strip_noise_prefix loop → 1 thêm duplicate bị quarantine |
+| quarantine_records | 211 | 212 | fix-03: "!!!Ticket P1..." sau khi strip → duplicate → quarantine |
 | Expectation halt? | YES — `refund_no_stale_14d_window FAIL` | NO — tất cả PASS | inject bypass với `--skip-validate` |
-| embed_prune_removed | 0 | 1 | Fix-01 xóa 1 vector stale từ inject-bad run |
+| embed_prune_removed | 0 | 29 | fix-03: flush toàn bộ stale vector từ run cũ + model thay đổi |
 
 ---
 
@@ -83,6 +83,5 @@ Kết quả: `freshness_check=FAIL` cho cả hai run.
 
 ## 5. Hạn chế & việc chưa làm
 
-- `q_p1_escalation` (test_questions.json): `contains_expected=no` với top-k=3 — escalation chunk ("10 phút") không vào top-3. Với top-k=10 thì PASS. Grading chính thức dùng top-k=10.
 - Freshness chỉ đo 1 boundary (publish). Bonus: thêm boundary ingest.
 - Không có LLM-judge — eval thuần keyword matching.

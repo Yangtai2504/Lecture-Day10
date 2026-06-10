@@ -31,7 +31,7 @@ def main() -> int:
         "--out",
         default=str(ROOT / "artifacts" / "eval" / "grading_run.jsonl"),
     )
-    p.add_argument("--top-k", type=int, default=10)
+    p.add_argument("--top-k", type=int, default=5)
     args = p.parse_args()
 
     try:

@@ -60,10 +60,16 @@ def _strip_noise_prefix(text: str) -> str:
     """
     Rule mới 1: Loại bỏ prefix nhiễu từ upstream export.
     "Nội dung không rõ ràng: " và "!!!" là artifact của hệ thống ingest cũ.
+    Một số row có prefix lồng nhau ("Nội dung không rõ ràng: !!!...") nên cần
+    loop cho đến khi ổn định — sub một lần không đủ.
     metric_impact: thay đổi chunk_text của ~12 rows; một số trở thành duplicate
     và bị quarantine bởi rule dedup, giảm cleaned_records.
     """
-    return _NOISE_PREFIX.sub("", text).strip()
+    prev = None
+    while prev != text:
+        prev = text
+        text = _NOISE_PREFIX.sub("", text).strip()
+    return text
 
 
 def _has_excessive_repetition(text: str) -> bool:

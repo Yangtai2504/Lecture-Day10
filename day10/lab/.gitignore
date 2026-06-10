@@ -1,4 +1,6 @@
 .env
+vertex-key.json
+*-key.json
 .venv/
 venv/
 __pycache__/

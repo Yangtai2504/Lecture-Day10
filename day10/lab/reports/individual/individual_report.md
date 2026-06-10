@@ -1,6 +1,6 @@
 # Báo Cáo Cá Nhân — Lab Day 10: Data Pipeline & Observability
 
-**Họ và tên:** Yangtai
+**Họ và tên:** Nguyễn Thái Dương
 **Vai trò:** Cleaning & Quality Owner + Embed Owner
 **Ngày nộp:** 2026-06-10
 **Độ dài:** ~550 từ

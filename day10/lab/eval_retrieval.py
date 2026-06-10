@@ -34,7 +34,7 @@ def main() -> int:
         default=str(ROOT / "artifacts" / "eval" / "before_after_eval.csv"),
         help="CSV kết quả",
     )
-    parser.add_argument("--top-k", type=int, default=3)
+    parser.add_argument("--top-k", type=int, default=5)
     args = parser.parse_args()
 
     try:

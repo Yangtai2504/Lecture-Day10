@@ -14,7 +14,9 @@
 
 ## 1. Pipeline tổng quan
 
-**Nguồn raw:** `data/raw/policy_export_dirty.csv` — **247 rows**, export từ 5 hệ thống nguồn (policy_refund_v4, sla_p1_2026, it_helpdesk_faq, hr_leave_policy, access_control_sop) cộng với ~12 doc_id không hợp lệ (invalid_doc_*, legacy_catalog_xyz_zzz, security_policy, data_privacy_guideline). Kết quả clean: **36 cleaned**, **211 quarantined**.
+**Nguồn raw:** `data/raw/policy_export_dirty.csv` — **247 rows**, export từ 5 hệ thống nguồn (policy_refund_v4, sla_p1_2026, it_helpdesk_faq, hr_leave_policy, access_control_sop) cộng với ~12 doc_id không hợp lệ (invalid_doc_*, legacy_catalog_xyz_zzz, security_policy, data_privacy_guideline). Kết quả clean: **35 cleaned**, **212 quarantined**.
+
+**Embedding model:** `paraphrase-multilingual-MiniLM-L12-v2` — model đa ngôn ngữ hiểu semantic tiếng Việt tốt hơn `all-MiniLM-L6-v2` (English-only). Fix root cause: P1 escalation chunk rank đúng top-3 thay vì rank 8 với model cũ.
 
 **Chuỗi lệnh end-to-end:**
 ```bash
