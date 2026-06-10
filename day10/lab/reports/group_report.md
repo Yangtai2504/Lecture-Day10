@@ -68,8 +68,31 @@ python grading_run.py --out artifacts/eval/grading_run.jsonl
 
 **Rule baseline chính:**
 - `unknown_doc_id`: ~110 rows từ invalid_doc_*, legacy_*, security_policy, data_privacy_guideline bị quarantine
-- `stale_hr_policy_effective_date`: HR rows với date < 2026-01-01 quarantine
+- `stale_hr_policy_effective_date`: HR rows có effective_date < `hr_leave_min_effective_date` quarantine (cutoff đọc từ contract — xem mục 2b)
 - `refund_no_stale_14d_window` (E3): khi inject `--no-refund-fix`, E3 FAIL halt
+
+### 2b. Rule versioning không hard-code (Distinction evidence — tiêu chí d)
+
+Rule 4 (`stale_hr_policy_effective_date`) **không** dùng giá trị ngày cố định trong code. Cutoff được đọc từ `contracts/data_contract.yaml → policy_versioning.hr_leave_min_effective_date`.
+
+**Cơ chế:**
+```python
+# transform/cleaning_rules.py — load_hr_min_effective_date()
+data = yaml.safe_load(contract_path.read_text())
+return data["policy_versioning"]["hr_leave_min_effective_date"]  # "2026-01-01"
+```
+
+**Chứng minh inject làm đổi quyết định clean:**
+
+| Contract cutoff | cleaned_records | quarantine_records | HR chunk trong KB |
+|-----------------|----------------|--------------------|-------------------|
+| `"2026-01-01"` (production) | 35 | 212 | Có (6 chunk HR 2026) |
+| `"2027-01-01"` (inject) | **29** | **218** | **Không** — HR 2026 quarantined |
+
+Inject run: `python etl_pipeline.py run --run-id inject-hr-cutoff --skip-validate`
+Artifact: `artifacts/quarantine/quarantine_inject-hr-cutoff.csv` — 218 rows, có `reason=stale_hr_policy_effective_date, hr_min_date_used=2027-01-01`
+
+Với cutoff inject, query "12 ngày phép năm" trả về kết quả từ policy_refund_v4 (sai hoàn toàn) — thay đổi contract một dòng làm hỏng toàn bộ HR retrieval. Lý do: thay đổi ngưỡng version trong contract phải được test bằng inject trước khi triển khai thật.
 
 **Ví dụ expectation fail (Sprint 3 inject):**
 ```

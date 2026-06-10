@@ -1,0 +1,19 @@
+run_id=inject-hr-cutoff
+raw_records=247
+cleaned_records=29
+quarantine_records=218
+cleaned_csv=artifacts\cleaned\cleaned_inject-hr-cutoff.csv
+quarantine_csv=artifacts\quarantine\quarantine_inject-hr-cutoff.csv
+expectation[min_one_row] OK (halt) :: cleaned_rows=29
+expectation[no_empty_doc_id] OK (halt) :: empty_doc_id_count=0
+expectation[refund_no_stale_14d_window] OK (halt) :: violations=0
+expectation[chunk_min_length_8] OK (warn) :: short_chunks=0
+expectation[effective_date_iso_yyyy_mm_dd] OK (halt) :: non_iso_rows=0
+expectation[hr_leave_no_stale_10d_annual] OK (halt) :: violations=0
+expectation[access_control_sop_present] OK (halt) :: access_control_sop_chunks=6
+expectation[no_stale_hr_2025_marker] OK (halt) :: stale_hr_2025_chunks=0
+embed_prune_removed=30
+embed_upsert count=29 collection=day10_kb
+manifest_written=artifacts\manifests\manifest_inject-hr-cutoff.json
+freshness_check=FAIL {"latest_exported_at": "2026-04-10T00:00:00", "age_hours": 1471.137, "sla_hours": 24.0, "reason": "freshness_sla_exceeded"}
+PIPELINE_OK

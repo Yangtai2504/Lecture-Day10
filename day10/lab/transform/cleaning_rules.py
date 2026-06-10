@@ -13,6 +13,28 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+_CONTRACT_PATH = Path(__file__).resolve().parent.parent / "contracts" / "data_contract.yaml"
+_DEFAULT_HR_MIN_DATE = "2026-01-01"
+
+
+def load_hr_min_effective_date(contract_path: Path = _CONTRACT_PATH) -> str:
+    """
+    Đọc hr_leave_min_effective_date từ data_contract.yaml → policy_versioning.
+    Rule 4 dùng giá trị này thay vì hard-code, để thay đổi contract là đủ để
+    thay đổi quyết định clean mà không cần sửa code.
+    Fallback về _DEFAULT_HR_MIN_DATE nếu file không tồn tại hoặc field vắng mặt.
+    """
+    try:
+        import yaml  # pyyaml
+        data = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+        val = (data or {}).get("policy_versioning", {}).get("hr_leave_min_effective_date")
+        if val:
+            return str(val)
+    except Exception:
+        pass
+    return _DEFAULT_HR_MIN_DATE
+
+
 # Khớp export hợp lệ trong lab (mở rộng khi nhóm thêm doc mới — phải đồng bộ contract).
 ALLOWED_DOC_IDS = frozenset(
     {
@@ -95,6 +117,7 @@ def clean_rows(
     rows: List[Dict[str, str]],
     *,
     apply_refund_window_fix: bool = True,
+    hr_min_date: str | None = None,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
     Trả về (cleaned, quarantine).
@@ -103,13 +126,16 @@ def clean_rows(
     1) Quarantine: doc_id không thuộc allowlist (export lạ / catalog sai).
     2) Chuẩn hoá effective_date sang YYYY-MM-DD; quarantine nếu không parse được.
     3) [NEW] Strip prefix nhiễu: "Nội dung không rõ ràng: " và "!!!".
-    4) Quarantine: chunk hr_leave_policy có effective_date < 2026-01-01 (bản HR cũ / conflict version).
+    4) Quarantine: chunk hr_leave_policy có effective_date < hr_min_date
+       (đọc từ data_contract.yaml → policy_versioning.hr_leave_min_effective_date,
+       không hard-code — thay đổi contract là đủ để thay đổi quyết định clean).
     5) [NEW] Quarantine: hr_leave_policy chứa "10 ngày phép năm" (marker bản HR 2025 stale).
     6) Quarantine: chunk_text rỗng hoặc effective_date rỗng sau chuẩn hoá.
     7) [NEW] Quarantine: text lặp lại quá mức (cùng đoạn ≥20 ký tự xuất hiện ≥3 lần).
     8) Loại trùng nội dung chunk_text (giữ bản đầu).
     9) Fix stale refund: policy_refund_v4 chứa '14 ngày làm việc' → 7 ngày.
     """
+    effective_hr_min = hr_min_date or load_hr_min_effective_date()
     quarantine: List[Dict[str, Any]] = []
     seen_text: set[str] = set()
     cleaned: List[Dict[str, Any]] = []
@@ -138,13 +164,14 @@ def clean_rows(
         # Rule 3 (NEW): strip noise prefix trước mọi kiểm tra nội dung
         text = _strip_noise_prefix(text)
 
-        # Rule 4: HR stale date filter
-        if doc_id == "hr_leave_policy" and eff_norm < "2026-01-01":
+        # Rule 4: HR stale date filter — cutoff đọc từ contract, không hard-code
+        if doc_id == "hr_leave_policy" and eff_norm < effective_hr_min:
             quarantine.append(
                 {
                     **raw,
                     "reason": "stale_hr_policy_effective_date",
                     "effective_date_normalized": eff_norm,
+                    "hr_min_date_used": effective_hr_min,
                 }
             )
             continue
