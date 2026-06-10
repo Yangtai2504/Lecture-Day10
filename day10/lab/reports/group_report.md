@@ -1,11 +1,8 @@
-# Báo Cáo Nhóm — Lab Day 10: Data Pipeline & Data Observability
+# Báo Cáo — Lab Day 10: Data Pipeline & Data Observability
 
-**Tên nhóm:** AI20k-Team
-**Thành viên:**
-| Tên | Vai trò (Day 10) | Email |
-|-----|------------------|-------|
-| Yangtai | Cleaning & Quality Owner + Embed Owner | yangtai@example.com |
-
+**Họ và tên:** Nguyễn Thái Dương
+**Vai trò:** Cleaning & Quality Owner · Embed Owner · Monitoring Owner
+**Email:** kienvbhpgamail@gmail.com
 **Ngày nộp:** 2026-06-10
 **Repo:** https://github.com/Yangtai2504/Lecture-Day10
 **Độ dài:** ~800 từ

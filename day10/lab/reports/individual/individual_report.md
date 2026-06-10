@@ -1,81 +1,81 @@
 # Báo Cáo Cá Nhân — Lab Day 10: Data Pipeline & Observability
 
 **Họ và tên:** Nguyễn Thái Dương
-**Vai trò:** Cleaning & Quality Owner + Embed Owner
+**Email:** kienvbhpgamail@gmail.com
+**Vai trò:** Toàn bộ pipeline (bài làm cá nhân)
 **Ngày nộp:** 2026-06-10
-**Độ dài:** ~550 từ
 
 ---
 
-## 1. Tôi phụ trách phần nào?
+## 1. Phần phụ trách
 
-**File / module:**
+Bài làm cá nhân — tôi sở hữu toàn bộ codebase.
 
-- `transform/cleaning_rules.py` — toàn bộ logic cleaning: allowlist, date normalization, strip noise, HR stale filter, repetition filter, dedup, refund fix
-- `quality/expectations.py` — toàn bộ expectation suite (E1–E8)
-- `etl_pipeline.py` — embed logic (upsert + prune), manifest generation
-- `.env` và `contracts/data_contract.yaml` — cấu hình pipeline
+| File / Module | Function / Rule cụ thể |
+|---------------|------------------------|
+| `transform/cleaning_rules.py` | `load_hr_min_effective_date()`, `_strip_noise_prefix()` (loop), `_has_excessive_repetition()`, Rule 3/5/7 mới, Rule 4 contract-driven |
+| `quality/expectations.py` | E7 `access_control_sop_present` (halt), E8 `no_stale_hr_2025_marker` (halt) |
+| `etl_pipeline.py` | embed upsert + prune idempotent, manifest generation |
+| `contracts/data_contract.yaml` | `policy_versioning.hr_leave_min_effective_date` — nguồn sự thật cho Rule 4 |
+| `.env` | `EMBEDDING_MODEL=paraphrase-multilingual-MiniLM-L12-v2` |
 
-**Kết nối với thành viên khác:**
-
-Pipeline output (`cleaned_*.csv`, `artifacts/manifests/`) được dùng bởi phần monitoring và docs. Grading JSONL được verify bởi toàn nhóm.
-
-**Bằng chứng:**
-
-- Thêm `access_control_sop` vào `ALLOWED_DOC_IDS` (dòng 20 `cleaning_rules.py`)
-- 3 rule mới: `_strip_noise_prefix` (Rule 3), `stale_hr_annual_leave_content` (Rule 5), `_has_excessive_repetition` (Rule 7)
-- 2 expectation mới: `access_control_sop_present` (E7, halt), `no_stale_hr_2025_marker` (E8, halt)
+**Bằng chứng:** commit `f8568c2` (rule versioning), commit `4e394b5` (multilingual model + noise loop fix). Run IDs chính: `fix-03`, `fix-04`, `inject-hr-cutoff`.
 
 ---
 
-## 2. Một quyết định kỹ thuật
+## 2. Một quyết định kỹ thuật: rule versioning đọc từ contract
 
-**Chọn `halt` cho E7 (`access_control_sop_present`) thay vì `warn`.**
+**Vấn đề:** Rule 4 (`stale_hr_policy_effective_date`) ban đầu hard-code chuỗi `"2026-01-01"` trong Python. Khi HR Team cập nhật policy, người vận hành phải sửa code → commit → deploy, dễ bỏ sót và không audit được.
 
-Khi thiết kế expectation E7, tôi có hai lựa chọn: `warn` (pipeline vẫn tiếp tục embed dù không có access_control_sop) hoặc `halt` (dừng pipeline nếu thiếu nguồn này).
+**Quyết định:** Đọc cutoff từ `contracts/data_contract.yaml` tại runtime:
 
-Tôi chọn `halt` vì: nếu `access_control_sop` vắng mặt trong cleaned data, bất kỳ câu hỏi nào về quyền truy cập Level 4 (IT Manager/CISO) sẽ không được trả lời đúng — đây là lỗi nghiêm trọng với impact trực tiếp lên người dùng. Một `warn` sẽ cho phép pipeline embed data thiếu mà không có signal rõ ràng.
-
-Nếu đây là production, tôi sẽ kết hợp `halt` với alert để team data biết nguồn nào bị thiếu, thay vì âm thầm cho qua.
-
----
-
-## 3. Một lỗi / anomaly đã xử lý
-
-**Triệu chứng:** Pipeline halt với `hr_leave_no_stale_10d_annual FAIL (halt)` dù baseline đã có rule quarantine HR rows có `effective_date < 2026-01-01`.
-
-**Phân tích:** Đọc raw CSV, tìm thấy các rows như:
-```
-row 9:  hr_leave_policy, "...10 ngày phép năm (bản HR 2025).", 2026-01-09
-row 22: hr_leave_policy, "...10 ngày phép năm (bản HR 2025).", 2026-01-04
-row 58: hr_leave_policy, "...10 ngày phép năm (bản HR 2025).", 2026-02-14
+```python
+def load_hr_min_effective_date(contract_path=_CONTRACT_PATH) -> str:
+    data = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+    return data["policy_versioning"]["hr_leave_min_effective_date"]
 ```
 
-Các rows này có `effective_date >= 2026-01-01` nên thoát qua Rule 4 (date filter), nhưng nội dung vẫn là bản HR 2025 cũ. Expectation E6 phát hiện ra và halt.
+Contract đã có sẵn field `hr_leave_min_effective_date: "2026-01-01"` — tôi nối code vào nguồn đó. Tradeoff: thêm YAML parse lúc runtime; nếu contract bị xóa, pipeline fallback về default thay vì crash — chấp nhận vì pipeline vẫn cần chạy được trong môi trường thiếu file (CI, test).
 
-**Fix:** Thêm Rule 5 — quarantine bất kỳ `hr_leave_policy` row nào có text chứa `"10 ngày phép năm"`, bất kể effective_date. Sau fix: tất cả HR stale rows bị quarantine, E6 và E8 đều PASS. Cleaned data chỉ giữ bản 2026 (`12 ngày phép năm`, `15 ngày`, `18 ngày`, v.v.).
+**Bằng chứng inject:** Đổi contract cutoff `"2026-01-01"` → `"2027-01-01"`, chạy `run-id inject-hr-cutoff`: `cleaned_records` 35 → 29 (6 HR chunk 2026 bị quarantine thêm), `quarantine_records` 212 → 218. File `artifacts/quarantine/quarantine_inject-hr-cutoff.csv` ghi `hr_min_date_used=2027-01-01` trên mỗi dòng bị loại.
+
+---
+
+## 3. Một sự cố / anomaly đã xử lý
+
+**Triệu chứng:** Sau khi thêm Rule 3 (`_strip_noise_prefix`), query P1 escalation vẫn trả về chunk bẩn `"!!!Ticket P1 có SLA phản hồi ban đầu 15 phút..."` ở rank #2, đẩy chunk đúng (`"Escalation P1: ... 10 phút"`) xuống rank 9 — `gq_d10_06` fail với top-k=5.
+
+**Root cause:** Hàm `_strip_noise_prefix` chỉ gọi `re.sub` một lần. Row 56 trong raw CSV có prefix lồng nhau `"Nội dung không rõ ràng: !!!Ticket P1..."`: sau một lần strip còn `"!!!Ticket P1..."`, dedup coi đây là text khác với bản sạch → PASS qua dedup → được embed vào ChromaDB, chiếm slot rank 2.
+
+**Fix:** Loop cho đến khi text không đổi:
+
+```python
+def _strip_noise_prefix(text: str) -> str:
+    prev = None
+    while prev != text:
+        prev = text
+        text = _NOISE_PREFIX.sub("", text).strip()
+    return text
+```
+
+**Sau fix (`run-id fix-02`):** `cleaned_records` 36 → 35 (chunk bẩn nay là duplicate → quarantine), `embed_prune_removed=29`. Chunk `"!!!Ticket P1..."` biến mất khỏi KB.
 
 ---
 
 ## 4. Bằng chứng trước / sau
 
-**run_id inject-bad** (Sprint 3 — `--no-refund-fix --skip-validate`):
-```
-question_id,contains_expected,hits_forbidden,top1_doc_id
-q_refund_window,yes,yes,policy_refund_v4  ← top-1: "14 ngày làm việc"
-```
-Expectation E3 FAIL: `refund_no_stale_14d_window violations=1`
+| Giai đoạn | cleaned | quarantine | gq_d10_06 (`10 phút`) | gq_d10_09 (`12 ngày`) |
+|-----------|---------|------------|----------------------|----------------------|
+| inject-bad (before) | 36 | 211 | contains=yes, forbidden=no | contains=no, **forbidden=yes** |
+| fix-02 + English model | 35 | 212 | **FAIL** — rank 8 với top-k=5 | PASS |
+| **fix-03** (multilingual) | 35 | 212 | **PASS** — rank 3 với top-k=5 | PASS |
 
-**run_id fix-01** (pipeline chuẩn, tất cả E1-E8 PASS):
-```
-question_id,contains_expected,hits_forbidden,top1_doc_id
-q_refund_window,yes,no,policy_refund_v4   ← top-1: "7 ngày làm việc"
-```
+`all-MiniLM-L6-v2` (English-only) không phân biệt ngữ nghĩa P1 vs P2 tiếng Việt: chunk P2 (`"Escalation sau 90 phút không phản hồi"`) luôn rank cao hơn P1. Switching sang `paraphrase-multilingual-MiniLM-L12-v2` đưa P1 escalation lên rank 3.
 
-Delta: `hits_forbidden` từ `yes` → `no`; `embed_prune_removed=1` (xóa 1 vector stale từ inject run). Grading: 10/10 câu PASS.
+Kết quả cuối: `artifacts/eval/grading_run.jsonl` — **10/10 PASS**, top-k=5, không workaround.
 
 ---
 
-## 5. Cải tiến tiếp theo
+## 5. Cải tiến nếu có thêm 2 giờ
 
-Nếu có thêm 2 giờ, tôi sẽ thêm **pydantic schema validation** trên cleaned rows (validate type + length + date range) trước bước embed, thay vì chỉ dùng custom expectation. Pydantic cho phép validate toàn bộ schema với một model duy nhất, error message rõ ràng hơn, và dễ mở rộng khi schema thay đổi. Hiện tại E5 chỉ check regex date format — một pydantic model sẽ check đồng thời tất cả fields.
+Tôi sẽ thêm **pydantic schema validation** trên cleaned rows trước bước embed. Hiện tại các expectation E1–E8 chỉ check logic nghiệp vụ; một pydantic `ChunkRecord` model sẽ validate đồng thời type, min_length, date format, và required fields trong một lần — error message rõ ràng và dễ mở rộng khi schema thay đổi. Điều này cũng đáp ứng Bonus +2 (pydantic validate thật) nếu được implement đầy đủ.
