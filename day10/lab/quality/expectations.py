@@ -112,5 +112,37 @@ def run_expectations(cleaned_rows: List[Dict[str, Any]]) -> Tuple[List[Expectati
         )
     )
 
+    # E7 (NEW): access_control_sop phải có ít nhất 1 chunk sau clean
+    # Bắt buộc để pipeline phục vụ đúng câu hỏi về quyền truy cập (gq_d10_10).
+    # metric_impact: FAIL khi access_control_sop bị loại khỏi allowlist hoặc bị inject xóa.
+    acs_rows = [r for r in cleaned_rows if r.get("doc_id") == "access_control_sop"]
+    ok7 = len(acs_rows) >= 1
+    results.append(
+        ExpectationResult(
+            "access_control_sop_present",
+            ok7,
+            "halt",
+            f"access_control_sop_chunks={len(acs_rows)}",
+        )
+    )
+
+    # E8 (NEW): không còn marker "(bản HR 2025)" trong bất kỳ chunk cleaned nào
+    # Xác nhận rule stale_hr_annual_leave_content đã loại sạch nội dung cũ.
+    # metric_impact: FAIL khi --no-refund-fix hoặc khi inject HR 2025 rows vào pipeline.
+    stale_hr_marker = [
+        r
+        for r in cleaned_rows
+        if "(bản HR 2025)" in (r.get("chunk_text") or "")
+    ]
+    ok8 = len(stale_hr_marker) == 0
+    results.append(
+        ExpectationResult(
+            "no_stale_hr_2025_marker",
+            ok8,
+            "halt",
+            f"stale_hr_2025_chunks={len(stale_hr_marker)}",
+        )
+    )
+
     halt = any(not r.passed and r.severity == "halt" for r in results)
     return results, halt

@@ -1,15 +1,14 @@
 # Data contract — Lab Day 10 (tiếp nối artifact CS + IT Helpdesk)
-# Sinh viên bổ sung owner, SLA freshness, và nguồn canonical.
 
-version: "1.0"
+version: "1.1"
 dataset: "kb_chunk_export"
-owner_team: "__TODO__"
+owner_team: "AI20k-Team"
 
 schema_cleaned:
   chunk_id:
     type: string
     required: true
-    description: "ID ổn định sau clean (thường hash hoặc doc_id + seq)"
+    description: "ID ổn định sau clean: sha256(doc_id|chunk_text|seq)[:16]"
   doc_id:
     type: string
     required: true
@@ -22,39 +21,64 @@ schema_cleaned:
   effective_date:
     type: date
     required: true
+    format: "YYYY-MM-DD"
   exported_at:
     type: datetime
-    required: true
+    required: false
+    format: "ISO 8601"
 
 quality_rules:
   - id: "no_duplicate_chunk_text"
     severity: "warn"
+    description: "Loại chunk trùng nội dung (giữ bản đầu tiên trong run)"
   - id: "no_stale_refund_window"
-    description: "Không được để chunk policy refund chứa cửa sổ 14 ngày (lệch so với v4 = 7 ngày)"
+    description: "Không để chunk policy_refund_v4 chứa '14 ngày làm việc' (v3 cũ)"
     severity: "halt"
+  - id: "strip_noise_prefix"
+    description: "Loại bỏ prefix 'Nội dung không rõ ràng: ' và '!!!' từ export hệ thống cũ"
+    severity: "warn"
+  - id: "stale_hr_annual_leave_content"
+    description: "Quarantine hr_leave_policy chứa '10 ngày phép năm' (bản HR 2025)"
+    severity: "halt"
+  - id: "excessive_text_repetition"
+    description: "Quarantine chunk lặp lại đoạn ≥20 ký tự 3+ lần (lỗi migration)"
+    severity: "warn"
 
 freshness:
-  measured_at: "publish"  # ingest | cleaned | publish
+  measured_at: "publish"
   sla_hours: 24
-  alert_channel: "__TODO__"
+  alert_channel: "slack:#data-pipeline-alerts"
 
 canonical_sources:
   - path: "data/docs/policy_refund_v4.txt"
     doc_id: "policy_refund_v4"
+    owner: "CS Team"
+    description: "Chính sách hoàn tiền v4 — cửa sổ 7 ngày làm việc"
   - path: "data/docs/sla_p1_2026.txt"
     doc_id: "sla_p1_2026"
+    owner: "IT Operations"
+    description: "SLA ticket P1 2026 — phản hồi 15 phút, resolution 4 giờ"
   - path: "data/docs/it_helpdesk_faq.txt"
     doc_id: "it_helpdesk_faq"
+    owner: "IT Helpdesk"
+    description: "FAQ nội bộ IT — khóa tài khoản, VPN, mật khẩu"
   - path: "data/docs/hr_leave_policy.txt"
     doc_id: "hr_leave_policy"
+    owner: "HR Team"
+    description: "Chính sách nghỉ phép 2026 — min effective_date 2026-01-01"
+  - path: "data/docs/access_control_sop.txt"
+    doc_id: "access_control_sop"
+    owner: "IT Security"
+    description: "SOP cấp quyền truy cập — Level 1-4, IT Manager/CISO"
 
-# Baseline allowlist export — nhóm mở rộng doc mới phải đồng bộ cleaning_rules + contract.
 allowed_doc_ids:
   - policy_refund_v4
   - sla_p1_2026
   - it_helpdesk_faq
   - hr_leave_policy
+  - access_control_sop
 
-# Merit/Distinction: có thể đưa cutoff versioning vào env và tham chiếu ở đây (tránh hard-code trong code).
 policy_versioning:
   hr_leave_min_effective_date: "2026-01-01"
+  refund_window_days: 7
+  refund_window_stale_marker: "14 ngày làm việc"

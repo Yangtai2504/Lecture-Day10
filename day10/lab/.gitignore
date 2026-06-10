@@ -9,3 +9,13 @@ chroma_db/
 *.log
 
 artifacts/*
+!artifacts/eval/
+!artifacts/eval/**
+!artifacts/manifests/
+!artifacts/manifests/**
+!artifacts/cleaned/
+!artifacts/cleaned/**
+!artifacts/quarantine/
+!artifacts/quarantine/**
+!artifacts/logs/
+!artifacts/logs/**

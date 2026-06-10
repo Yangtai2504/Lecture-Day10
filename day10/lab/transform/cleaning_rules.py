@@ -20,11 +20,14 @@ ALLOWED_DOC_IDS = frozenset(
         "sla_p1_2026",
         "it_helpdesk_faq",
         "hr_leave_policy",
+        "access_control_sop",  # thêm mới: cần cho gq_d10_10 (IT Manager/CISO)
     }
 )
 
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _DMY_SLASH = re.compile(r"^(\d{2})/(\d{2})/(\d{4})$")
+_NOISE_PREFIX = re.compile(r"^(Nội dung không rõ ràng:\s*|!+\s*)")
+_REPEATED_SEGMENT = re.compile(r"(.{20,}?)\1{2,}")
 
 
 def _norm_text(s: str) -> str:
@@ -53,6 +56,26 @@ def _normalize_effective_date(raw: str) -> Tuple[str, str]:
     return "", "invalid_effective_date_format"
 
 
+def _strip_noise_prefix(text: str) -> str:
+    """
+    Rule mới 1: Loại bỏ prefix nhiễu từ upstream export.
+    "Nội dung không rõ ràng: " và "!!!" là artifact của hệ thống ingest cũ.
+    metric_impact: thay đổi chunk_text của ~12 rows; một số trở thành duplicate
+    và bị quarantine bởi rule dedup, giảm cleaned_records.
+    """
+    return _NOISE_PREFIX.sub("", text).strip()
+
+
+def _has_excessive_repetition(text: str) -> bool:
+    """
+    Rule mới 2: Phát hiện text bị copy-paste lặp lại (≥3 lần, đoạn ≥20 ký tự).
+    Đây là lỗi migration — cùng câu xuất hiện 3-5 lần trong một chunk.
+    metric_impact: quarantine ~4 rows có repetition khi inject; khi pipeline chuẩn
+    giảm quarantine nếu data sạch.
+    """
+    return bool(_REPEATED_SEGMENT.search(text))
+
+
 def load_raw_csv(path: Path) -> List[Dict[str, str]]:
     rows: List[Dict[str, str]] = []
     with path.open(encoding="utf-8", newline="") as f:
@@ -70,13 +93,16 @@ def clean_rows(
     """
     Trả về (cleaned, quarantine).
 
-    Baseline (mở rộng theo narrative Day 10):
+    Rules (baseline + mở rộng):
     1) Quarantine: doc_id không thuộc allowlist (export lạ / catalog sai).
     2) Chuẩn hoá effective_date sang YYYY-MM-DD; quarantine nếu không parse được.
-    3) Quarantine: chunk hr_leave_policy có effective_date < 2026-01-01 (bản HR cũ / conflict version).
-    4) Quarantine: chunk_text rỗng hoặc effective_date rỗng sau chuẩn hoá.
-    5) Loại trùng nội dung chunk_text (giữ bản đầu).
-    6) Fix stale refund: policy_refund_v4 chứa '14 ngày làm việc' → 7 ngày.
+    3) [NEW] Strip prefix nhiễu: "Nội dung không rõ ràng: " và "!!!".
+    4) Quarantine: chunk hr_leave_policy có effective_date < 2026-01-01 (bản HR cũ / conflict version).
+    5) [NEW] Quarantine: hr_leave_policy chứa "10 ngày phép năm" (marker bản HR 2025 stale).
+    6) Quarantine: chunk_text rỗng hoặc effective_date rỗng sau chuẩn hoá.
+    7) [NEW] Quarantine: text lặp lại quá mức (cùng đoạn ≥20 ký tự xuất hiện ≥3 lần).
+    8) Loại trùng nội dung chunk_text (giữ bản đầu).
+    9) Fix stale refund: policy_refund_v4 chứa '14 ngày làm việc' → 7 ngày.
     """
     quarantine: List[Dict[str, Any]] = []
     seen_text: set[str] = set()
@@ -89,10 +115,12 @@ def clean_rows(
         eff_raw = raw.get("effective_date", "")
         exported_at = raw.get("exported_at", "")
 
+        # Rule 1: allowlist
         if doc_id not in ALLOWED_DOC_IDS:
             quarantine.append({**raw, "reason": "unknown_doc_id"})
             continue
 
+        # Rule 2: normalize date
         eff_norm, eff_err = _normalize_effective_date(eff_raw)
         if eff_err == "empty_effective_date":
             quarantine.append({**raw, "reason": "missing_effective_date"})
@@ -101,6 +129,10 @@ def clean_rows(
             quarantine.append({**raw, "reason": eff_err, "effective_date_raw": eff_raw})
             continue
 
+        # Rule 3 (NEW): strip noise prefix trước mọi kiểm tra nội dung
+        text = _strip_noise_prefix(text)
+
+        # Rule 4: HR stale date filter
         if doc_id == "hr_leave_policy" and eff_norm < "2026-01-01":
             quarantine.append(
                 {
@@ -111,16 +143,35 @@ def clean_rows(
             )
             continue
 
+        # Rule 5 (NEW): HR stale annual leave content — quarantine bất kể date
+        if doc_id == "hr_leave_policy" and "10 ngày phép năm" in text:
+            quarantine.append(
+                {
+                    **raw,
+                    "reason": "stale_hr_annual_leave_content",
+                    "effective_date_normalized": eff_norm,
+                }
+            )
+            continue
+
+        # Rule 6: empty text after strip
         if not text:
             quarantine.append({**raw, "reason": "missing_chunk_text"})
             continue
 
+        # Rule 7 (NEW): excessive repetition
+        if _has_excessive_repetition(text):
+            quarantine.append({**raw, "reason": "excessive_text_repetition"})
+            continue
+
+        # Rule 8: dedup by normalized text
         key = _norm_text(text)
         if key in seen_text:
             quarantine.append({**raw, "reason": "duplicate_chunk_text"})
             continue
         seen_text.add(key)
 
+        # Rule 9: fix stale refund window
         fixed_text = text
         if apply_refund_window_fix and doc_id == "policy_refund_v4":
             if "14 ngày làm việc" in fixed_text:
