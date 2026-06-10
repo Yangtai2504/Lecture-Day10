@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<title>Data Cleaning Pipeline — Lab Day 10</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; padding: 32px; }
+  h1 { font-size: 1.6rem; font-weight: 700; color: #f8fafc; margin-bottom: 4px; }
+  .subtitle { color: #94a3b8; font-size: 0.9rem; margin-bottom: 32px; }
+
+  /* STATS */
+  .stats { display: flex; gap: 16px; margin-bottom: 32px; flex-wrap: wrap; }
+  .stat { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px 28px; flex: 1; min-width: 140px; }
+  .stat .num { font-size: 2.4rem; font-weight: 800; }
+  .stat .label { font-size: 0.8rem; color: #94a3b8; margin-top: 4px; }
+  .stat.raw .num { color: #60a5fa; }
+  .stat.clean .num { color: #34d399; }
+  .stat.quar .num { color: #f87171; }
+  .stat.expect .num { color: #a78bfa; }
+
+  /* PIPELINE FLOW */
+  .flow { display: flex; align-items: center; gap: 0; margin-bottom: 32px; flex-wrap: wrap; }
+  .flow-box { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 14px 18px; text-align: center; min-width: 120px; }
+  .flow-box .icon { font-size: 1.5rem; }
+  .flow-box .name { font-size: 0.78rem; font-weight: 600; color: #e2e8f0; margin-top: 4px; }
+  .flow-box .sub { font-size: 0.68rem; color: #64748b; margin-top: 2px; }
+  .arrow { color: #475569; font-size: 1.4rem; padding: 0 6px; }
+  .flow-box.active { border-color: #3b82f6; background: #1e3a5f; }
+  .flow-box.warn { border-color: #f59e0b; }
+  .flow-box.ok { border-color: #10b981; }
+
+  /* RULES */
+  h2 { font-size: 1.1rem; font-weight: 700; color: #f1f5f9; margin-bottom: 16px; margin-top: 8px; }
+  .rules { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; margin-bottom: 32px; }
+  .rule { background: #1e293b; border-radius: 10px; padding: 16px; border-left: 4px solid #334155; position: relative; }
+  .rule.quarantine { border-left-color: #ef4444; }
+  .rule.transform  { border-left-color: #f59e0b; }
+  .rule.dedup      { border-left-color: #8b5cf6; }
+  .rule.fix        { border-left-color: #10b981; }
+  .rule.new::after { content: "NEW"; position: absolute; top: 10px; right: 10px; background: #7c3aed; color: white; font-size: 0.62rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; }
+  .rule-num { font-size: 0.7rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+  .rule-title { font-size: 0.95rem; font-weight: 700; color: #f1f5f9; margin-bottom: 6px; }
+  .rule-desc { font-size: 0.8rem; color: #94a3b8; line-height: 1.5; }
+  .rule-count { display: inline-block; margin-top: 8px; font-size: 0.75rem; font-weight: 600; padding: 2px 10px; border-radius: 20px; }
+  .rule.quarantine .rule-count { background: #450a0a; color: #fca5a5; }
+  .rule.transform  .rule-count { background: #451a03; color: #fcd34d; }
+  .rule.dedup      .rule-count { background: #2e1065; color: #c4b5fd; }
+  .rule.fix        .rule-count { background: #022c22; color: #6ee7b7; }
+
+  /* EXAMPLE ROWS */
+  .examples { margin-bottom: 32px; }
+  .example { background: #1e293b; border-radius: 10px; padding: 20px; margin-bottom: 14px; }
+  .example h3 { font-size: 0.85rem; font-weight: 700; color: #94a3b8; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px; }
+  .row-trace { display: flex; flex-direction: column; gap: 8px; }
+  .trace-step { display: flex; align-items: flex-start; gap: 12px; }
+  .trace-badge { min-width: 90px; font-size: 0.7rem; font-weight: 700; padding: 3px 10px; border-radius: 6px; text-align: center; margin-top: 1px; }
+  .badge-pass { background: #052e16; color: #4ade80; }
+  .badge-fail { background: #450a0a; color: #f87171; }
+  .badge-fix  { background: #451a03; color: #fbbf24; }
+  .badge-input{ background: #0f172a; color: #94a3b8; border: 1px solid #334155; }
+  .trace-text { font-size: 0.82rem; color: #cbd5e1; line-height: 1.5; font-family: 'Consolas', monospace; }
+  .trace-text .highlight { color: #f87171; font-weight: 600; }
+  .trace-text .ok        { color: #4ade80; font-weight: 600; }
+  .trace-text .muted     { color: #475569; }
+
+  /* QUARANTINE BREAKDOWN */
+  .breakdown { background: #1e293b; border-radius: 10px; padding: 20px; margin-bottom: 32px; }
+  .bar-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .bar-label { font-size: 0.78rem; color: #94a3b8; width: 280px; flex-shrink: 0; font-family: monospace; }
+  .bar-track { flex: 1; background: #0f172a; border-radius: 4px; height: 18px; }
+  .bar-fill { height: 100%; border-radius: 4px; display: flex; align-items: center; padding-left: 8px; font-size: 0.7rem; font-weight: 700; color: white; min-width: 30px; transition: width 0.6s ease; }
+  .bar-fill.b1 { background: #ef4444; }
+  .bar-fill.b2 { background: #8b5cf6; }
+  .bar-fill.b3 { background: #f59e0b; }
+  .bar-fill.b4 { background: #3b82f6; }
+  .bar-fill.b5 { background: #ec4899; }
+  .bar-fill.b6 { background: #14b8a6; }
+
+  /* GRADING */
+  .grading { background: #1e293b; border-radius: 10px; padding: 20px; margin-bottom: 32px; }
+  .grade-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin-top: 12px; }
+  .grade-item { background: #0f172a; border-radius: 8px; padding: 12px; border: 1px solid #1e3a5f; }
+  .grade-item .gid { font-size: 0.7rem; font-weight: 700; color: #60a5fa; font-family: monospace; }
+  .grade-item .gq  { font-size: 0.75rem; color: #94a3b8; margin-top: 4px; line-height: 1.4; }
+  .grade-item .gpass { display: inline-block; margin-top: 8px; font-size: 0.7rem; font-weight: 700; padding: 2px 8px; border-radius: 4px; background: #052e16; color: #4ade80; }
+
+  /* DISTINCTION */
+  .distinction { background: linear-gradient(135deg, #1e1b4b, #1e293b); border: 1px solid #4f46e5; border-radius: 10px; padding: 20px; margin-bottom: 32px; }
+  .distinction h2 { color: #a5b4fc; }
+  .inject-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 0.82rem; }
+  .inject-table th { background: #1e1b4b; color: #a5b4fc; padding: 8px 12px; text-align: left; }
+  .inject-table td { padding: 8px 12px; border-top: 1px solid #2d2b55; }
+  .inject-table tr:hover td { background: #1e1b4b; }
+  td.good { color: #34d399; font-weight: 600; }
+  td.bad  { color: #f87171; font-weight: 600; }
+
+  footer { color: #334155; font-size: 0.75rem; margin-top: 16px; text-align: center; }
+</style>
+</head>
+<body>
+
+<h1>🔬 Data Cleaning Pipeline — Lab Day 10</h1>
+<p class="subtitle">policy_export_dirty.csv → 9 rules → ChromaDB · run-id: fix-03</p>
+
+<!-- STATS -->
+<div class="stats">
+  <div class="stat raw">
+    <div class="num">247</div>
+    <div class="label">raw_records đầu vào</div>
+  </div>
+  <div class="stat clean">
+    <div class="num">35</div>
+    <div class="label">cleaned → ChromaDB</div>
+  </div>
+  <div class="stat quar">
+    <div class="num">212</div>
+    <div class="label">quarantined (86%)</div>
+  </div>
+  <div class="stat expect">
+    <div class="num">8/8</div>
+    <div class="label">expectations PASS</div>
+  </div>
+  <div class="stat" style="border-color:#10b981">
+    <div class="num" style="color:#34d399">10/10</div>
+    <div class="label">grading questions PASS</div>
+  </div>
+</div>
+
+<!-- PIPELINE FLOW -->
+<h2>Luồng pipeline</h2>
+<div class="flow" style="margin-bottom:32px">
+  <div class="flow-box">
+    <div class="icon">📄</div>
+    <div class="name">Raw CSV</div>
+    <div class="sub">247 rows</div>
+  </div>
+  <div class="arrow">→</div>
+  <div class="flow-box active">
+    <div class="icon">🧹</div>
+    <div class="name">clean_rows()</div>
+    <div class="sub">9 rules</div>
+  </div>
+  <div class="arrow">→</div>
+  <div class="flow-box ok">
+    <div class="icon">✅</div>
+    <div class="name">Cleaned CSV</div>
+    <div class="sub">35 rows</div>
+  </div>
+  <div class="arrow">→</div>
+  <div class="flow-box">
+    <div class="icon">🔍</div>
+    <div class="name">Expectations</div>
+    <div class="sub">E1–E8</div>
+  </div>
+  <div class="arrow">→</div>
+  <div class="flow-box ok">
+    <div class="icon">🧠</div>
+    <div class="name">ChromaDB</div>
+    <div class="sub">35 vectors</div>
+  </div>
+  <div class="arrow" style="color:#ef4444">↘</div>
+  <div class="flow-box warn">
+    <div class="icon">🗑️</div>
+    <div class="name">Quarantine</div>
+    <div class="sub">212 rows</div>
+  </div>
+</div>
+
+<!-- 9 RULES -->
+<h2>9 Cleaning Rules</h2>
+<div class="rules">
+
+  <div class="rule quarantine">
+    <div class="rule-num">Rule 1 · Allowlist</div>
+    <div class="rule-title">unknown_doc_id</div>
+    <div class="rule-desc">doc_id không thuộc 5 nguồn hợp lệ (policy_refund_v4, sla_p1_2026, it_helpdesk_faq, hr_leave_policy, access_control_sop) → quarantine ngay.</div>
+    <span class="rule-count">~110 rows bị loại</span>
+  </div>
+
+  <div class="rule transform">
+    <div class="rule-num">Rule 2 · Date Normalize</div>
+    <div class="rule-title">effective_date → YYYY-MM-DD</div>
+    <div class="rule-desc">"15/03/2026" → "2026-03-15" ✓ · rỗng hoặc format lạ → quarantine. Chạy trước mọi so sánh ngày.</div>
+    <span class="rule-count">~3 rows bị loại</span>
+  </div>
+
+  <div class="rule transform new">
+    <div class="rule-num">Rule 3 · Strip Noise Prefix [NEW]</div>
+    <div class="rule-title">_strip_noise_prefix() — loop</div>
+    <div class="rule-desc">Loại "Nội dung không rõ ràng: " và "!!!". Loop đến khi text ổn định — bắt prefix lồng nhau. Không quarantine, chỉ biến đổi text trước các rule sau.</div>
+    <span class="rule-count">~12 rows được sửa text</span>
+  </div>
+
+  <div class="rule quarantine">
+    <div class="rule-num">Rule 4 · HR Date Filter</div>
+    <div class="rule-title">stale_hr_policy_effective_date</div>
+    <div class="rule-desc">hr_leave_policy với effective_date &lt; cutoff. Cutoff đọc từ contracts/data_contract.yaml (không hard-code) → hiện tại "2026-01-01".</div>
+    <span class="rule-count">~10 rows bị loại</span>
+  </div>
+
+  <div class="rule quarantine new">
+    <div class="rule-num">Rule 5 · HR Content Filter [NEW]</div>
+    <div class="rule-title">stale_hr_annual_leave_content</div>
+    <div class="rule-desc">hr_leave_policy có text chứa "10 ngày phép năm" dù date >= 2026. Date chỉ là ngày export, nội dung vẫn là HR 2025 → quarantine.</div>
+    <span class="rule-count">~8 rows bị loại</span>
+  </div>
+
+  <div class="rule quarantine">
+    <div class="rule-num">Rule 6 · Empty Check</div>
+    <div class="rule-title">missing_chunk_text</div>
+    <div class="rule-desc">chunk_text rỗng sau khi strip prefix (Rule 3). Chunk không có nội dung không nên vào vector store.</div>
+    <span class="rule-count">~1 row bị loại</span>
+  </div>
+
+  <div class="rule quarantine new">
+    <div class="rule-num">Rule 7 · Repetition Check [NEW]</div>
+    <div class="rule-title">excessive_text_repetition</div>
+    <div class="rule-desc">Regex (.{20,}?)\1{2,} — phát hiện đoạn ≥20 ký tự lặp lại ≥3 lần trong cùng chunk. Lỗi migration copy-paste.</div>
+    <span class="rule-count">~4 rows bị loại</span>
+  </div>
+
+  <div class="rule dedup">
+    <div class="rule-num">Rule 8 · Dedup</div>
+    <div class="rule-title">duplicate_chunk_text</div>
+    <div class="rule-desc">So sánh normalized text (lowercase + collapse whitespace). Giữ bản đầu tiên, các bản sau → quarantine. "Ticket P1 SLA 15 phút" xuất hiện 25 lần trong raw.</div>
+    <span class="rule-count">~80 rows bị loại</span>
+  </div>
+
+  <div class="rule fix">
+    <div class="rule-num">Rule 9 · Refund Fix</div>
+    <div class="rule-title">stale_refund_window → sửa tại chỗ</div>
+    <div class="rule-desc">policy_refund_v4 có "14 ngày làm việc" → replace thành "7 ngày làm việc [cleaned: stale_refund_window]". Không quarantine — giữ chunk với nội dung đúng.</div>
+    <span class="rule-count">1 row được sửa</span>
+  </div>
+
+</div>
+
+<!-- EXAMPLES -->
+<h2>Ví dụ từng row đi qua pipeline</h2>
+<div class="examples">
+
+  <!-- Example 1 -->
+  <div class="example">
+    <h3>Ví dụ 1 — Row bị loại tại Rule 1 (invalid doc_id)</h3>
+    <div class="row-trace">
+      <div class="trace-step">
+        <span class="trace-badge badge-input">INPUT</span>
+        <span class="trace-text">doc_id="<span class="highlight">invalid_doc_001</span>" · chunk_text="Lorem ipsum..." · date="2026-01-01"</span>
+      </div>
+      <div class="trace-step">
+        <span class="trace-badge badge-fail">R1 FAIL</span>
+        <span class="trace-text">"invalid_doc_001" ∉ ALLOWED_DOC_IDS → <span class="highlight">quarantine</span>(reason="unknown_doc_id") · stop</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Example 2 -->
+  <div class="example">
+    <h3>Ví dụ 2 — Prefix lồng nhau (Row 56)</h3>
+    <div class="row-trace">
+      <div class="trace-step">
+        <span class="trace-badge badge-input">INPUT</span>
+        <span class="trace-text">doc_id="sla_p1_2026" · text="<span class="highlight">Nội dung không rõ ràng: !!!Ticket P1</span> có SLA phản hồi ban đầu 15 phút..."</span>
+      </div>
+      <div class="trace-step">
+        <span class="trace-badge badge-pass">R1 PASS</span>
+        <span class="trace-text">sla_p1_2026 ∈ allowlist</span>
+      </div>
+      <div class="trace-step">
+        <span class="trace-badge badge-pass">R2 PASS</span>
+        <span class="trace-text">date "2026-01-01" → ISO ok</span>
+      </div>
+      <div class="trace-step">
+        <span class="trace-badge badge-fix">R3 FIX</span>
+        <span class="trace-text">
+          loop 1: sub "Nội dung không rõ ràng: " → "<span class="highlight">!!!Ticket P1</span>..." · chưa ổn định<br>
+          loop 2: sub "!!!" → "<span class="ok">Ticket P1</span>..." · ổn định → thoát loop
+        </span>
+      </div>
+      <div class="trace-step">
+        <span class="trace-badge badge-fail">R8 FAIL</span>
+        <span class="trace-text">normalized text == bản sạch đã có trong seen_set → <span class="highlight">quarantine</span>(reason="duplicate_chunk_text")</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Example 3 -->
+  <div class="example">
+    <h3>Ví dụ 3 — HR row: date ổn nhưng content cũ (Rule 5)</h3>
+    <div class="row-trace">
+      <div class="trace-step">
+        <span class="trace-badge badge-input">INPUT</span>
+        <span class="trace-text">doc_id="hr_leave_policy" · text="Nhân viên dưới 3 năm được <span class="highlight">10 ngày phép năm</span> (bản HR 2025)." · date="2026-01-09"</span>
+      </div>
+      <div class="trace-step">
+        <span class="trace-badge badge-pass">R1–3 PASS</span>
+        <span class="trace-text">allowlist ok · date "2026-01-09" ok · không có noise prefix</span>
+      </div>
+      <div class="trace-step">
+        <span class="trace-badge badge-pass">R4 PASS</span>
+        <span class="trace-text">"2026-01-09" &gt;= "2026-01-01" → <span class="ok">không bị loại bởi date filter</span></span>
+      </div>
+      <div class="trace-step">
+        <span class="trace-badge badge-fail">R5 FAIL</span>
+        <span class="trace-text">doc_id=="hr_leave_policy" AND "<span class="highlight">10 ngày phép năm</span>" in text → <span class="highlight">quarantine</span>(reason="stale_hr_annual_leave_content")</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Example 4 -->
+  <div class="example">
+    <h3>Ví dụ 4 — Row sạch + refund fix (Rule 9)</h3>
+    <div class="row-trace">
+      <div class="trace-step">
+        <span class="trace-badge badge-input">INPUT</span>
+        <span class="trace-text">doc_id="policy_refund_v4" · text="...chấp nhận trong vòng <span class="highlight">14 ngày làm việc</span> kể từ xác nhận đơn." · date="2026-01-01"</span>
+      </div>
+      <div class="trace-step">
+        <span class="trace-badge badge-pass">R1–8 PASS</span>
+        <span class="trace-text">allowlist ok · date ok · không prefix · không HR · text không rỗng · không lặp · chưa thấy text này</span>
+      </div>
+      <div class="trace-step">
+        <span class="trace-badge badge-fix">R9 FIX</span>
+        <span class="trace-text">"<span class="highlight">14 ngày làm việc</span>" → "<span class="ok">7 ngày làm việc</span> [cleaned: stale_refund_window]"</span>
+      </div>
+      <div class="trace-step">
+        <span class="trace-badge badge-pass">CLEANED</span>
+        <span class="trace-text">chunk_id = sha256("policy_refund_v4|&lt;fixed_text&gt;|1")[:16] → <span class="ok">"policy_refund_v4_1_a3f2b1c9..."</span></span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- QUARANTINE BREAKDOWN -->
+<h2>Phân tích 212 rows quarantine</h2>
+<div class="breakdown">
+  <div class="bar-row">
+    <div class="bar-label">unknown_doc_id (Rule 1)</div>
+    <div class="bar-track"><div class="bar-fill b1" style="width:52%">110</div></div>
+  </div>
+  <div class="bar-row">
+    <div class="bar-label">duplicate_chunk_text (Rule 8)</div>
+    <div class="bar-track"><div class="bar-fill b2" style="width:38%">80</div></div>
+  </div>
+  <div class="bar-row">
+    <div class="bar-label">stale_hr_annual_leave_content (Rule 5)</div>
+    <div class="bar-track"><div class="bar-fill b3" style="width:4%">8</div></div>
+  </div>
+  <div class="bar-row">
+    <div class="bar-label">stale_hr_policy_effective_date (Rule 4)</div>
+    <div class="bar-track"><div class="bar-fill b4" style="width:5%">10</div></div>
+  </div>
+  <div class="bar-row">
+    <div class="bar-label">excessive_text_repetition (Rule 7)</div>
+    <div class="bar-track"><div class="bar-fill b5" style="width:2%">4</div></div>
+  </div>
+  <div class="bar-row">
+    <div class="bar-label">missing / invalid date, empty text</div>
+    <div class="bar-track"><div class="bar-fill b6" style="width:2%">~4</div></div>
+  </div>
+</div>
+
+<!-- DISTINCTION -->
+<div class="distinction">
+  <h2>⭐ Distinction Evidence — Rule versioning từ contract</h2>
+  <p style="font-size:0.82rem;color:#94a3b8;margin-top:8px;margin-bottom:16px">
+    Rule 4 đọc cutoff từ <code style="color:#a5b4fc">contracts/data_contract.yaml → policy_versioning.hr_leave_min_effective_date</code>
+    thay vì hard-code. Thay đổi 1 dòng trong YAML làm thay đổi quyết định clean toàn bộ.
+  </p>
+  <table class="inject-table">
+    <thead>
+      <tr><th>Contract cutoff</th><th>cleaned_records</th><th>quarantine_records</th><th>HR chunk trong KB</th><th>gq_d10_09 (HR 12 ngày)</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>"2026-01-01"</code> (production)</td>
+        <td class="good">35</td>
+        <td>212</td>
+        <td class="good">Có (6 chunks)</td>
+        <td class="good">PASS</td>
+      </tr>
+      <tr>
+        <td><code>"2027-01-01"</code> (inject-hr-cutoff)</td>
+        <td class="bad">29 (−6)</td>
+        <td class="bad">218 (+6)</td>
+        <td class="bad">Không — HR 2026 bị quarantine</td>
+        <td class="bad">FAIL — trả về refund policy</td>
+      </tr>
+    </tbody>
+  </table>
+  <p style="font-size:0.75rem;color:#64748b;margin-top:10px">Artifact: artifacts/quarantine/quarantine_inject-hr-cutoff.csv · cột hr_min_date_used=2027-01-01</p>
+</div>
+
+<!-- GRADING -->
+<div class="grading">
+  <h2>✅ Grading — 10/10 PASS (top-k=5)</h2>
+  <div class="grade-grid">
+    <div class="grade-item"><div class="gid">gq_d10_01</div><div class="gq">Refund window: 7 ngày</div><span class="gpass">PASS · top1=policy_refund_v4</span></div>
+    <div class="grade-item"><div class="gid">gq_d10_02</div><div class="gq">Sản phẩm không được hoàn: digital</div><span class="gpass">PASS · top1=policy_refund_v4</span></div>
+    <div class="grade-item"><div class="gid">gq_d10_03</div><div class="gq">Finance Team xử lý: 3-5 ngày</div><span class="gpass">PASS · top1=policy_refund_v4</span></div>
+    <div class="grade-item"><div class="gid">gq_d10_04</div><div class="gq">SLA P1 first response: 15 phút</div><span class="gpass">PASS · top1=sla_p1_2026</span></div>
+    <div class="grade-item"><div class="gid">gq_d10_05</div><div class="gq">SLA P1 resolution: 4 giờ</div><span class="gpass">PASS · top1=sla_p1_2026</span></div>
+    <div class="grade-item"><div class="gid">gq_d10_06</div><div class="gq">P1 auto escalate: 10 phút</div><span class="gpass">PASS · top1=sla_p1_2026</span></div>
+    <div class="grade-item"><div class="gid">gq_d10_07</div><div class="gq">Lockout: 5 lần đăng nhập sai</div><span class="gpass">PASS · top1=it_helpdesk_faq</span></div>
+    <div class="grade-item"><div class="gid">gq_d10_08</div><div class="gq">VPN: 2 thiết bị cùng lúc</div><span class="gpass">PASS · top1=it_helpdesk_faq</span></div>
+    <div class="grade-item"><div class="gid">gq_d10_09</div><div class="gq">HR phép năm &lt;3 năm KN: 12 ngày</div><span class="gpass">PASS · top1=hr_leave_policy</span></div>
+    <div class="grade-item"><div class="gid">gq_d10_10</div><div class="gq">Level 4 Access: IT Manager/CISO</div><span class="gpass">PASS · top1=access_control_sop</span></div>
+  </div>
+</div>
+
+<footer>Lab Day 10 · paraphrase-multilingual-MiniLM-L12-v2 · ChromaDB day10_kb · run-id fix-03</footer>
+
+</body>
+</html>

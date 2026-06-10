@@ -24,22 +24,76 @@ python etl_pipeline.py run
 | File | Nội dung |
 |------|----------|
 | `artifacts/logs/run_<run-id>.log` | Toàn bộ output: số records, expectation results, embed count |
-| `artifacts/cleaned/cleaned_<run-id>.csv` | 35 rows sạch sau 9 rules |
-| `artifacts/quarantine/quarantine_<run-id>.csv` | 212 rows bị loại + cột `reason` |
+| `artifacts/cleaned/cleaned_<run-id>.csv` | Các rows sạch sau 9 rules |
+| `artifacts/quarantine/quarantine_<run-id>.csv` | Các rows bị loại + cột `reason` |
 | `artifacts/manifests/manifest_<run-id>.json` | Snapshot run: timestamp, record counts |
-| `chroma_db/` | Vector store — 35 vectors được upsert |
+| `chroma_db/` | Vector store — clean vectors được upsert |
 
 **Pipeline HALT** nếu bất kỳ expectation `halt` nào fail — đọc log để tìm nguyên nhân.
 
+Row vào
+  │
+  ├─ Rule 1: doc_id có trong allowlist không?
+  │         Không → quarantine (reason: unknown_doc_id)       ~110 rows bị loại
+  │         Có → tiếp tục
+  │
+  ├─ Rule 2: effective_date parse được không?
+  │         "15/03/2026" → chuyển thành "2026-03-15" ✓
+  │         "abc" → quarantine (reason: invalid_effective_date_format)
+  │         rỗng → quarantine (reason: missing_effective_date)
+  │
+  ├─ Rule 3 [mới]: strip prefix nhiễu khỏi chunk_text
+  │         "Nội dung không rõ ràng: !!!Ticket P1..."
+  │          → loop strip → "Ticket P1..."   (không quarantine, chỉ sửa text)
+  │
+  ├─ Rule 4: hr_leave_policy + effective_date < cutoff từ contract?
+  │         date=2025-xx → quarantine (reason: stale_hr_policy_effective_date)
+  │
+  ├─ Rule 5 [mới]: hr_leave_policy + text chứa "10 ngày phép năm"?
+  │         → quarantine (reason: stale_hr_annual_leave_content)
+  │         (bắt trường hợp date=2026 nhưng nội dung vẫn là HR 2025)
+  │
+  ├─ Rule 6: chunk_text rỗng sau khi strip?
+  │         → quarantine (reason: missing_chunk_text)
+  │
+  ├─ Rule 7 [mới]: cùng đoạn ≥20 ký tự xuất hiện ≥3 lần?
+  │         → quarantine (reason: excessive_text_repetition)
+  │
+  ├─ Rule 8: text đã thấy rồi (duplicate)?
+  │         normalized_text ∈ seen_set → quarantine (reason: duplicate_chunk_text)
+  │         (đây là lý do ~25 bản copy của "Ticket P1 SLA 15 phút" bị loại)
+  │
+  └─ Rule 9: policy_refund_v4 chứa "14 ngày làm việc"?
+            → thay bằng "7 ngày làm việc [cleaned: stale_refund_window]"
+            (không quarantine, sửa tại chỗ)
+              │
+              ▼
+           cleaned ✓ — gán chunk_id = sha256(doc_id|text|seq)[:16]
+
 ---
 
-## 3. Grading (khi giảng viên gửi câu hỏi)
+Cleaning rules → hành động: nhìn thấy row xấu → quarantine/sửa nó
+Expectations → kiểm tra hậu kỳ: nhìn vào toàn bộ cleaned data → xác nhận kết quả đúng như kỳ vọng
+
+Sau khi cleaning_rules.py lọc data, expectations.py ktra độ tin cậy của clean data ok hay k, nếu không → stop.
+
+E7 — access_control_sop_present (halt)
+
+Kiểm tra: sau khi clean, phải có ít nhất 1 chunk từ access_control_sop.
+
+Lý do cần thiết: trong baseline ban đầu, access_control_sop không có trong allowlist (ALLOWED_DOC_IDS). Kết quả: toàn bộ chunks từ nguồn này bị Rule 1 quarantine → ChromaDB không có gì về access control → gq_d10_10 (Level 4 access) fail. E7 đặt guard: nếu sửa allowlist bị revert hoặc ai xóa nhầm, pipeline halt ngay, không âm thầm embed KB thiếu.
+
+E8 — no_stale_hr_2025_marker (halt)
+
+Kiểm tra: không có chunk nào trong cleaned data còn chuỗi "(bản HR 2025)".
+
+Lý do cần thiết: Rule 5 quarantine HR rows dựa trên text "10 ngày phép năm". Nhưng một số rows bẩn có cả hai — chứa "(bản HR 2025)" mà không có cụm từ trên — nên thoát Rule 5. E8 là lớp bảo vệ thứ hai: nếu bất kỳ chunk nào có marker rõ ràng "(bản HR 2025)" lọt qua rules → halt, không cho embed lên KB.
+
+## 3. Grading 
 
 ```bash
 python grading_run.py --questions data/grading_questions.json --out artifacts/eval/grading_run.jsonl
 ```
-
-Thay `data/grading_questions.json` bằng file giảng viên gửi nếu khác.
 
 **Kết quả lưu vào:** `artifacts/eval/grading_run.jsonl` — 10 dòng JSON, mỗi dòng 1 câu.
 

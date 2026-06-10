@@ -2,10 +2,8 @@
 
 **Họ và tên:** Nguyễn Thái Dương
 **Vai trò:** Cleaning & Quality Owner · Embed Owner · Monitoring Owner
-**Email:** kienvbhpgamail@gmail.com
 **Ngày nộp:** 2026-06-10
 **Repo:** https://github.com/Yangtai2504/Lecture-Day10
-**Độ dài:** ~800 từ
 
 ---
 
